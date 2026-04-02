@@ -1,0 +1,16 @@
+services:
+  digest:
+    build: .
+    env_file: .env
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.digest.schedule: "0 0 9 * * 1"  # every Monday at 09:00
+      ofelia.job-exec.digest.command: "uv run python main.py"
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    depends_on:
+      - digest
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
