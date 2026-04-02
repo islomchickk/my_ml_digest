@@ -2,6 +2,7 @@ services:
   digest:
     build: .
     env_file: .env
+    command: tail -f /dev/null  # keep alive for ofelia job-exec
     labels:
       ofelia.enabled: "true"
       ofelia.job-exec.digest.schedule: "0 0 9 * * 1"  # every Monday at 09:00
