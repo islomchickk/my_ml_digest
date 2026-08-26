@@ -8,8 +8,8 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str = ""):
-        self.client = openai.OpenAI(api_key=api_key)
+    def __init__(self, api_key: str, model: str = "", base_url: str | None = None):
+        self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
         self.model = model or DEFAULT_MODEL
 
     def complete(

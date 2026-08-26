@@ -21,10 +21,11 @@
 
 ## Поддерживаемые LLM-провайдеры
 
-- Claude (по умолчанию)
+- Claude
 - OpenAI
 - Gemini
 - OpenRouter
+- NeuralDeep (по умолчанию, OpenAI-совместимый API)
 
 ## Быстрый старт
 
@@ -43,7 +44,7 @@ uv run python main.py
 ### Флаги
 
 ```
---llm <provider>   LLM-провайдер: claude, openai, gemini, openrouter
+--llm <provider>   LLM-провайдер: claude, openai, gemini, openrouter, neuraldeep
 --no-stats         Не собирать статистику Хабра
 --dry-run          Не отправлять в Telegram
 --no-parse         Пропустить парсинг, загрузить из articles.json
@@ -72,14 +73,15 @@ TG_CHAT_ID=           # ID чата для отправки
 TG_CHANNEL_ID=        # ID канала (опционально)
 
 # LLM
-LLM_PROVIDER=claude   # claude | openai | gemini | openrouter
-LLM_MODEL=            # модель (опционально, используется дефолтная)
+LLM_PROVIDER=neuraldeep  # claude | openai | gemini | openrouter | neuraldeep
+LLM_MODEL=qwen3.6-unlim  # модель (опционально, используется дефолтная)
 
 # API-ключи (заполни только нужный)
 ANTHROPIC_API_KEY=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 OPENROUTER_API_KEY=
+NEURALDEEP_API_KEY=
 
 # Парсер
 FETCH_HABR_STATS=true

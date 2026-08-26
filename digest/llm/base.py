@@ -31,5 +31,8 @@ def get_provider(config: Config) -> LLMProvider:
     elif name == "openrouter":
         from digest.llm.openrouter import OpenRouterProvider
         return OpenRouterProvider(config.openrouter_api_key, config.llm_model)
+    elif name == "neuraldeep":
+        from digest.llm.neuraldeep import NeuralDeepProvider
+        return NeuralDeepProvider(config.neuraldeep_api_key, config.llm_model)
     else:
         raise ValueError(f"Unknown LLM provider: {name}")

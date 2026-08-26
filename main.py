@@ -2,10 +2,11 @@
 Digest: сбор статей → фильтрация LLM → отправка в Telegram.
 
 Использование:
-    uv run python main.py                    # Claude по умолчанию
+    uv run python main.py                    # провайдер из .env
     uv run python main.py --llm openai       # OpenAI
     uv run python main.py --llm gemini       # Gemini
     uv run python main.py --llm openrouter   # OpenRouter
+    uv run python main.py --llm neuraldeep   # NeuralDeep
     uv run python main.py --no-stats         # без статистики Хабра
     uv run python main.py --dry-run          # без отправки в Telegram
     uv run python main.py --test-send        # отправить digest_output.json в TG_CHAT_ID
@@ -64,7 +65,11 @@ def _test_send(config: Config) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Weekly article digest")
-    parser.add_argument("--llm", type=str, help="LLM provider: claude, openai, gemini, openrouter")
+    parser.add_argument(
+        "--llm",
+        type=str,
+        help="LLM provider: claude, openai, gemini, openrouter, neuraldeep",
+    )
     parser.add_argument("--no-stats", action="store_true", help="Skip fetching Habr stats")
     parser.add_argument("--dry-run", action="store_true", help="Don't send to Telegram")
     parser.add_argument("--no-parse", action="store_true", help="Skip parsing, load from articles.json")
