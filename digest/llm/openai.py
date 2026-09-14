@@ -9,9 +9,13 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str = "", base_url: str | None = None):
+    def __init__(
+        self, api_key: str, model: str = "", base_url: str | None = None,
+        max_output_tokens: int | None = None,
+    ):
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
         self.model = model or DEFAULT_MODEL
+        self.max_output_tokens = max_output_tokens
 
     def complete(
         self,
@@ -26,6 +30,8 @@ class OpenAIProvider(LLMProvider):
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if self.max_output_tokens is not None:
+            kwargs["max_tokens"] = self.max_output_tokens
         if json_schema:
             kwargs["response_format"] = {
                 "type": "json_schema",

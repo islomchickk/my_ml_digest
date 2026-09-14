@@ -3,6 +3,7 @@ from typing import Any
 
 import openai
 
+from digest.config import DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS
 from digest.llm.openai import OpenAIProvider
 from digest.llm.token_budget import fit_article_prompt, request_overhead
 
@@ -18,13 +19,19 @@ _INPUT_LIMIT_ERROR = re.compile(r"(\d+)\s+токенов входа при пр�
 class NeuralDeepProvider(OpenAIProvider):
     """NeuralDeep через OpenAI-совместимый Chat Completions API."""
 
-    def __init__(self, api_key: str, model: str = ""):
+    def __init__(
+        self, api_key: str, model: str = "",
+        max_output_tokens: int = DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS,
+    ):
         if not api_key:
             raise ValueError("NEURALDEEP_API_KEY is not set")
+        if not 1 <= max_output_tokens <= DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS:
+            raise ValueError("NEURALDEEP_MAX_OUTPUT_TOKENS must be between 1 and 8000")
         super().__init__(
             api_key=api_key,
             model=model or DEFAULT_MODEL,
             base_url=BASE_URL,
+            max_output_tokens=max_output_tokens,
         )
 
     def complete(
@@ -40,7 +47,8 @@ class NeuralDeepProvider(OpenAIProvider):
             print(
                 f"NeuralDeep: {prepared.article_count} articles; estimated input "
                 f"{prepared.estimated_tokens} tokens (budget {budget}, "
-                f"plan limit {MAX_INPUT_TOKENS}; tokenizer estimate)"
+                f"plan limit {MAX_INPUT_TOKENS}; tokenizer estimate); "
+                f"max output {self.max_output_tokens} tokens"
             )
             try:
                 return super().complete(system_prompt, prepared.text, json_schema)

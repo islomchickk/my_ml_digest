@@ -33,6 +33,9 @@ def get_provider(config: Config) -> LLMProvider:
         return OpenRouterProvider(config.openrouter_api_key, config.llm_model)
     elif name == "neuraldeep":
         from digest.llm.neuraldeep import NeuralDeepProvider
-        return NeuralDeepProvider(config.neuraldeep_api_key, config.llm_model)
+        return NeuralDeepProvider(
+            config.neuraldeep_api_key, config.llm_model,
+            max_output_tokens=config.neuraldeep_max_output_tokens,
+        )
     else:
         raise ValueError(f"Unknown LLM provider: {name}")

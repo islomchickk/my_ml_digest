@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_HABR_STATS_LIMIT = 50
+DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS = 8_000
 
 
 @dataclass
@@ -18,6 +19,7 @@ class Config:
     # LLM провайдер: claude | openai | gemini | openrouter | neuraldeep
     llm_provider: str = "neuraldeep"
     llm_model: str = ""  # если пусто — используется дефолт провайдера
+    neuraldeep_max_output_tokens: int = DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS
 
     # API ключи
     anthropic_api_key: str = ""
@@ -38,6 +40,9 @@ class Config:
             tg_channel_id=os.getenv("TG_CHANNEL_ID", ""),
             llm_provider=os.getenv("LLM_PROVIDER", "neuraldeep"),
             llm_model=os.getenv("LLM_MODEL", ""),
+            neuraldeep_max_output_tokens=int(os.getenv(
+                "NEURALDEEP_MAX_OUTPUT_TOKENS", str(DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS),
+            )),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
