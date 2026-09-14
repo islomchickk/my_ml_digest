@@ -134,6 +134,23 @@ class ThinkingTests(unittest.TestCase):
         self.addCleanup(provider.client.close)
         self.assertEqual(provider.model, "custom-openai-model")
 
+    def test_mode_selection_is_case_insensitive_and_exclusive_to_neuraldeep(self):
+        config = Config(llm_provider="NeUrAlDeEp", neuraldeep_api_key="test-key",
+                        neuraldeep_enable_thinking=False, neuraldeep_model_no_thinking="custom-noreason")
+        requests, _ = self.request(get_provider(config))
+        self.assertEqual(requests[0]["model"], "custom-noreason")
+        for name, module, cls, key_field in (
+            ("OPENAI", "openai", "OpenAIProvider", "openai_api_key"),
+            ("OpenRouter", "openrouter", "OpenRouterProvider", "openrouter_api_key"),
+            ("CLAUDE", "claude", "ClaudeProvider", "anthropic_api_key"),
+            ("GEMINI", "gemini", "GeminiProvider", "gemini_api_key"),
+        ):
+            with self.subTest(provider=name), patch(f"digest.llm.{module}.{cls}") as constructor:
+                config = Config(llm_provider=name, llm_model="other-model", neuraldeep_enable_thinking=True,
+                                neuraldeep_model_thinking="must-not-use", **{key_field: "test-key"})
+                get_provider(config)
+                constructor.assert_called_once_with("test-key", "other-model")
+
 
 if __name__ == "__main__":
     unittest.main()

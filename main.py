@@ -18,11 +18,13 @@ Digest: сбор статей → фильтрация LLM → отправка 
 import argparse
 import asyncio
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
 
 from digest.config import Config
+from digest.article_cache import ArticleCache
 from digest.parser import collect_articles
 from digest.llm import get_provider
 from digest.llm.errors import LLMResponseError
@@ -89,6 +91,7 @@ def _test_send(config: Config) -> None:
 
 def generate_digest(
     config: Config, no_parse: bool = False, exclude_urls: set[str] | None = None,
+    *, use_article_cache: bool = False,
 ) -> tuple[list[DigestEntry], list[DigestEntry]]:
     # 1. Collect articles
     if no_parse:
@@ -113,11 +116,22 @@ def generate_digest(
         ]
         print(f"Loaded {len(articles)} articles")
     else:
-        print("=== Collecting articles ===")
-        articles = collect_articles(
-            fetch_stats=config.fetch_habr_stats, habr_stats_limit=config.habr_stats_limit,
-            exclude_urls=exclude_urls,
-        )
+        cache = ArticleCache(Path(os.getenv("DIGEST_DATA_DIR", str(ARTICLES_FILE.parent / "data")))
+                             / "articles_cache.json")
+        cached = cache.load_fresh() if use_article_cache else None
+        if cached is not None:
+            articles = cached.articles
+            print(f"=== Using article cache: {len(articles)} articles; "
+                  f"parsed_at={cached.parsed_at}; TTL 24h ===", flush=True)
+        else:
+            print("=== Collecting articles (cache missing or expired) ===" if use_article_cache
+                  else "=== Collecting articles ===", flush=True)
+            # Cache the entire pool so forgotten deliveries can be selected again.
+            # Per-chat delivery exclusions are applied after loading or parsing.
+            articles = collect_articles(
+                fetch_stats=config.fetch_habr_stats, habr_stats_limit=config.habr_stats_limit,
+            )
+            cache.save(articles)
 
         # Save articles to articles.json
         articles_data = [asdict(a) for a in articles]
@@ -235,7 +249,9 @@ def main():
             print(f"Remembered {len(entries) + len(mentions)} previously sent articles")
             return
         if args.bot:
-            asyncio.run(run_bot(config, lambda excluded: generate_digest(config, exclude_urls=excluded), store))
+            asyncio.run(run_bot(config, lambda excluded: generate_digest(
+                config, exclude_urls=excluded, use_article_cache=True,
+            ), store))
             return
         with store.generation_lock():
             history_chat = config.tg_chat_id or config.tg_channel_id
