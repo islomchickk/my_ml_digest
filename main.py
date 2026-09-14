@@ -35,6 +35,36 @@ LLM_RESPONSE_FILE = Path("llm_response.txt")
 LLM_API_RESPONSE_FILE = Path("llm_response.json")
 
 
+def _save_digest(entries: list[DigestEntry], mentions: list[DigestEntry]) -> None:
+    output = {
+        "top": [asdict(entry) for entry in entries],
+        "honorable_mentions": [asdict(mention) for mention in mentions],
+    }
+    DIGEST_OUTPUT_FILE.write_text(
+        json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+
+
+def _load_saved_digest() -> tuple[list[DigestEntry], list[DigestEntry]]:
+    text = DIGEST_OUTPUT_FILE.read_text(encoding="utf-8")
+    entries, mentions = parse_llm_response(text, [])
+    # Older files contain only the top array. Recover the missing section only
+    # when the saved LLM answer describes exactly the same top entries.
+    if isinstance(json.loads(text), list) and LLM_RESPONSE_FILE.exists():
+        try:
+            original_entries, original_mentions = parse_llm_response(
+                LLM_RESPONSE_FILE.read_text(encoding="utf-8"), [],
+            )
+        except ValueError:
+            print("Saved LLM answer is invalid; using the legacy digest without mentions")
+        else:
+            if entries == original_entries:
+                mentions = original_mentions
+                _save_digest(entries, mentions)
+                print("Recovered honorable mentions and updated digest_output.json")
+    return entries, mentions
+
+
 def _test_send(config: Config) -> None:
     """Загружает digest_output.json и отправляет дайджест только в TG_CHAT_ID."""
     if not config.tg_bot_token:
@@ -44,25 +74,11 @@ def _test_send(config: Config) -> None:
     if not DIGEST_OUTPUT_FILE.exists():
         print("digest_output.json not found. Run the full pipeline first."); sys.exit(1)
 
-    with open(DIGEST_OUTPUT_FILE, "r", encoding="utf-8") as f:
-        raw = json.load(f)
+    entries, mentions = _load_saved_digest()
 
-    entries = [
-        DigestEntry(
-            title=e["title"],
-            url=e["url"],
-            source=e["source"],
-            author=e["author"],
-            tags=e.get("tags", []),
-            summary=e["summary"],
-            category=e.get("category", ""),
-        )
-        for e in raw
-    ]
-
-    print(f"Loaded {len(entries)} entries from digest_output.json")
+    print(f"Loaded {len(entries)} entries + {len(mentions)} honorable mentions from digest_output.json")
     print(f"Sending digest to TG_CHAT_ID={config.tg_chat_id}...")
-    asyncio.run(send_digest(entries, config.tg_bot_token, [config.tg_chat_id]))
+    asyncio.run(send_digest(entries, config.tg_bot_token, [config.tg_chat_id], mentions))
     print("Done!")
 
 
@@ -163,20 +179,7 @@ def main():
             print()
 
     # 3. Save to JSON
-    output = [
-        {
-            "title": e.title,
-            "url": e.url,
-            "source": e.source,
-            "author": e.author,
-            "tags": e.tags,
-            "summary": e.summary,
-            "category": e.category,
-        }
-        for e in entries
-    ]
-    with open("digest_output.json", "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+    _save_digest(entries, mentions)
     print("Saved to digest_output.json")
 
     # 4. Send to Telegram
