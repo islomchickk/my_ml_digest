@@ -12,6 +12,7 @@ Digest: сбор статей → фильтрация LLM → отправка 
     uv run python main.py --test-send        # отправить digest_output.json в TG_CHAT_ID
     uv run python main.py --bot              # постоянно обслуживать кнопки Telegram
     uv run python main.py --remember-sent    # импортировать уже отправленный дайджест в историю
+    uv run python main.py --forget-last-sent # сбросить последнюю отправку из истории
 """
 
 import argparse
@@ -190,9 +191,11 @@ def main():
     parser.add_argument("--no-stats", action="store_true", help="Skip fetching Habr stats")
     parser.add_argument("--dry-run", action="store_true", help="Don't send to Telegram")
     parser.add_argument("--no-parse", action="store_true", help="Load articles.json instead of RSS")
-    parser.add_argument("--test-send", action="store_true", help="Send saved digest to TG_CHAT_ID")
-    parser.add_argument("--bot", action="store_true", help="Listen for Telegram buttons continuously")
-    parser.add_argument("--remember-sent", action="store_true", help="Import the saved digest into TG_CHAT_ID delivery history")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--test-send", action="store_true", help="Send saved digest to TG_CHAT_ID")
+    mode.add_argument("--bot", action="store_true", help="Listen for Telegram buttons continuously")
+    mode.add_argument("--remember-sent", action="store_true", help="Import the saved digest into TG_CHAT_ID delivery history")
+    mode.add_argument("--forget-last-sent", action="store_true", help="Forget the latest delivered digest for TG_CHAT_ID")
     args = parser.parse_args()
     config = Config.from_env()
     if args.llm:
@@ -204,6 +207,16 @@ def main():
             _test_send(config)
             return
         store = DigestStore()
+        if args.forget_last_sent:
+            if not config.tg_chat_id:
+                raise ValueError("TG_CHAT_ID not set")
+            result = store.forget_last_delivery(config.tg_chat_id)
+            if result is None:
+                print("No delivered digest found for TG_CHAT_ID; history unchanged")
+            else:
+                pool_size, removed = result
+                print(f"Forgot last digest ({pool_size} articles); removed {removed} new URLs from history")
+            return
         if args.remember_sent:
             if not config.tg_chat_id:
                 raise ValueError("TG_CHAT_ID not set")
