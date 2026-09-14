@@ -3,11 +3,15 @@ from typing import Any
 
 import openai
 
-from digest.config import DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS, DEFAULT_NEURALDEEP_THINKING_TOKEN_BUDGET
+from digest.config import (
+    DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS,
+    DEFAULT_NEURALDEEP_MODEL_NO_THINKING,
+    DEFAULT_NEURALDEEP_MODEL_THINKING,
+    DEFAULT_NEURALDEEP_THINKING_TOKEN_BUDGET,
+)
 from digest.llm.openai import OpenAIProvider
 from digest.llm.token_budget import fit_article_prompt, request_overhead
 
-DEFAULT_MODEL = "qwen3.6-unlim"
 BASE_URL = "https://api.neuraldeep.ru/v1"
 MAX_INPUT_TOKENS = 46_112
 TOKEN_SAFETY_MARGIN = 1_024
@@ -41,7 +45,8 @@ class NeuralDeepProvider(OpenAIProvider):
             template_kwargs["thinking_token_budget"] = thinking_token_budget
         super().__init__(
             api_key=api_key,
-            model=model or DEFAULT_MODEL,
+            model=model or (DEFAULT_NEURALDEEP_MODEL_THINKING if enable_thinking
+                            else DEFAULT_NEURALDEEP_MODEL_NO_THINKING),
             base_url=BASE_URL,
             max_output_tokens=max_output_tokens,
             extra_body={"chat_template_kwargs": template_kwargs},
@@ -58,7 +63,7 @@ class NeuralDeepProvider(OpenAIProvider):
         for attempt in range(MAX_ATTEMPTS):
             prepared = fit_article_prompt(user_prompt, overhead, budget)
             print(
-                f"NeuralDeep: {prepared.article_count} articles; estimated input "
+                f"NeuralDeep: model={self.model}; {prepared.article_count} articles; estimated input "
                 f"{prepared.estimated_tokens} tokens (budget {budget}, "
                 f"plan limit {MAX_INPUT_TOKENS}; tokenizer estimate); "
                 f"max output {self.max_output_tokens} tokens; "

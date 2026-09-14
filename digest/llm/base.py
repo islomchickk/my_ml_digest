@@ -33,8 +33,10 @@ def get_provider(config: Config) -> LLMProvider:
         return OpenRouterProvider(config.openrouter_api_key, config.llm_model)
     elif name == "neuraldeep":
         from digest.llm.neuraldeep import NeuralDeepProvider
+        model = (config.neuraldeep_model_thinking if config.neuraldeep_enable_thinking
+                 else config.neuraldeep_model_no_thinking)
         return NeuralDeepProvider(
-            config.neuraldeep_api_key, config.llm_model,
+            config.neuraldeep_api_key, model,
             max_output_tokens=config.neuraldeep_max_output_tokens,
             enable_thinking=config.neuraldeep_enable_thinking,
             thinking_token_budget=config.neuraldeep_thinking_token_budget,

@@ -8,6 +8,8 @@ load_dotenv()
 DEFAULT_HABR_STATS_LIMIT = 50
 DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS = 8_000
 DEFAULT_NEURALDEEP_THINKING_TOKEN_BUDGET = 1_024
+DEFAULT_NEURALDEEP_MODEL_THINKING = "qwen3.6-unlim"
+DEFAULT_NEURALDEEP_MODEL_NO_THINKING = "qwen3.6-unlim-noreason"
 
 
 @dataclass
@@ -20,6 +22,8 @@ class Config:
     # LLM провайдер: claude | openai | gemini | openrouter | neuraldeep
     llm_provider: str = "neuraldeep"
     llm_model: str = ""  # если пусто — используется дефолт провайдера
+    neuraldeep_model_thinking: str = DEFAULT_NEURALDEEP_MODEL_THINKING
+    neuraldeep_model_no_thinking: str = DEFAULT_NEURALDEEP_MODEL_NO_THINKING
     neuraldeep_max_output_tokens: int = DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS
     neuraldeep_enable_thinking: bool = False
     neuraldeep_thinking_token_budget: int = DEFAULT_NEURALDEEP_THINKING_TOKEN_BUDGET
@@ -43,6 +47,10 @@ class Config:
             tg_channel_id=os.getenv("TG_CHANNEL_ID", ""),
             llm_provider=os.getenv("LLM_PROVIDER", "neuraldeep"),
             llm_model=os.getenv("LLM_MODEL", ""),
+            neuraldeep_model_thinking=(os.getenv("NEURALDEEP_MODEL_THINKING", "").strip()
+                                      or DEFAULT_NEURALDEEP_MODEL_THINKING),
+            neuraldeep_model_no_thinking=(os.getenv("NEURALDEEP_MODEL_NO_THINKING", "").strip()
+                                         or DEFAULT_NEURALDEEP_MODEL_NO_THINKING),
             neuraldeep_max_output_tokens=int(os.getenv(
                 "NEURALDEEP_MAX_OUTPUT_TOKENS", str(DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS),
             )),

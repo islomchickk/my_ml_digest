@@ -56,7 +56,7 @@ class ThinkingTests(unittest.TestCase):
         body = requests[0]
         self.assertEqual(body["chat_template_kwargs"], {"enable_thinking": False})
         self.assertEqual(body["max_tokens"], 8000)
-        self.assertEqual(body["model"], "qwen3.6-unlim")
+        self.assertEqual(body["model"], "qwen3.6-unlim-noreason")
         self.assertEqual(body["response_format"]["type"], "json_schema")
         self.assertNotIn("reasoning_effort", body)
         self.assertIn("thinking=off", log)
@@ -67,6 +67,7 @@ class ThinkingTests(unittest.TestCase):
         ), retry=True)
         self.assertEqual(len(requests), 2)
         for body in requests:
+            self.assertEqual(body["model"], "qwen3.6-unlim")
             self.assertEqual(body["chat_template_kwargs"],
                              {"enable_thinking": True, "thinking_token_budget": 1024})
             self.assertEqual(body["max_tokens"], 8000)
@@ -102,6 +103,36 @@ class ThinkingTests(unittest.TestCase):
         with patch.dict("os.environ", {"NEURALDEEP_ENABLE_THINKING": "ture"}):
             with self.assertRaisesRegex(ValueError, "must be true or false"):
                 Config.from_env()
+
+    def test_env_model_pair_selects_correct_alias_in_http_request(self):
+        for enabled, expected in (("true", "custom-thinking"), ("false", "custom-noreason")):
+            with self.subTest(enabled=enabled), patch.dict("os.environ", {
+                "LLM_PROVIDER": "neuraldeep", "NEURALDEEP_API_KEY": "test-key",
+                "LLM_MODEL": "legacy-model-must-not-override-mode",
+                "NEURALDEEP_MODEL_THINKING": "custom-thinking",
+                "NEURALDEEP_MODEL_NO_THINKING": "custom-noreason",
+                "NEURALDEEP_ENABLE_THINKING": enabled,
+                "NEURALDEEP_MAX_OUTPUT_TOKENS": "8000",
+                "NEURALDEEP_THINKING_TOKEN_BUDGET": "1024",
+            }):
+                requests, log = self.request(get_provider(Config.from_env()))
+            self.assertEqual(requests[0]["model"], expected)
+            self.assertEqual(requests[0]["chat_template_kwargs"]["enable_thinking"], enabled == "true")
+            self.assertIn(f"model={expected}", log)
+
+    def test_empty_model_env_values_use_mode_defaults(self):
+        with patch.dict("os.environ", {
+            "NEURALDEEP_MODEL_THINKING": "", "NEURALDEEP_MODEL_NO_THINKING": "  ",
+        }):
+            config = Config.from_env()
+        self.assertEqual(config.neuraldeep_model_thinking, "qwen3.6-unlim")
+        self.assertEqual(config.neuraldeep_model_no_thinking, "qwen3.6-unlim-noreason")
+
+    def test_other_providers_keep_llm_model(self):
+        provider = get_provider(Config(llm_provider="openai", openai_api_key="test-key",
+                                       llm_model="custom-openai-model"))
+        self.addCleanup(provider.client.close)
+        self.assertEqual(provider.model, "custom-openai-model")
 
 
 if __name__ == "__main__":

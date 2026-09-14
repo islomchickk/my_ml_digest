@@ -146,10 +146,16 @@ docker compose exec digest uv run python main.py
 оборванный ответ сохраняется для диагностики, но не отправляется как дайджест.
 Лимит сам по себе не гарантирует завершение JSON-ответа.
 
-Для Qwen рассуждения отключены по умолчанию: `NEURALDEEP_ENABLE_THINKING=false`.
-В API передаётся `chat_template_kwargs.enable_thinking=false`; модель отвечает
-сразу JSON. Три этапа отбора и формат дайджеста сохраняются, но выбор статей
-может отличаться от режима с рассуждениями.
+Модель NeuralDeep выбирается по `NEURALDEEP_ENABLE_THINKING`:
+`true` использует `NEURALDEEP_MODEL_THINKING` (по умолчанию `qwen3.6-unlim`),
+`false` — `NEURALDEEP_MODEL_NO_THINKING` (по умолчанию `qwen3.6-unlim-noreason`).
+Оба имени можно менять в `.env`. Для NeuralDeep `LLM_MODEL` не используется;
+он задаёт модель для остальных провайдеров. Выбранное имя выводится в лог.
+По умолчанию используется режим без рассуждений. В API дополнительно передаётся
+`chat_template_kwargs.enable_thinking=false`: одного флага на алиасе
+`qwen3.6-unlim` оказалось недостаточно, поэтому выбирается отдельный алиас.
+Три этапа отбора и формат дайджеста сохраняются, но выбор статей может отличаться
+от режима с рассуждениями. Доступность алиасов зависит от API вашего аккаунта.
 Чтобы включить ограниченные рассуждения, задайте `NEURALDEEP_ENABLE_THINKING=true`
 и `NEURALDEEP_THINKING_TOKEN_BUDGET=1024`. Бюджет должен быть положительным и
 меньше общего лимита выхода; он не добавляется сверх 8 000 токенов.
@@ -199,7 +205,9 @@ TG_CHANNEL_ID=        # ID канала (опционально)
 
 # LLM
 LLM_PROVIDER=neuraldeep  # claude | openai | gemini | openrouter | neuraldeep
-LLM_MODEL=qwen3.6-unlim  # модель (опционально, используется дефолтная)
+LLM_MODEL=  # модель для остальных провайдеров
+NEURALDEEP_MODEL_THINKING=qwen3.6-unlim
+NEURALDEEP_MODEL_NO_THINKING=qwen3.6-unlim-noreason
 NEURALDEEP_MAX_OUTPUT_TOKENS=8000  # потолок генерации NeuralDeep
 NEURALDEEP_ENABLE_THINKING=false  # Qwen: сразу отвечать без рассуждений
 NEURALDEEP_THINKING_TOKEN_BUDGET=1024  # применяется при ENABLE_THINKING=true
