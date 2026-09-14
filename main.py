@@ -25,6 +25,7 @@ from pathlib import Path
 
 from digest.config import Config
 from digest.article_cache import ArticleCache
+from digest.company_sources import filter_company_articles
 from digest.parser import collect_articles
 from digest.llm import get_provider
 from digest.llm.errors import LLMResponseError
@@ -139,7 +140,8 @@ def generate_digest(
             json.dump(articles_data, f, ensure_ascii=False, indent=2)
         print(f"Saved {len(articles)} articles to articles.json")
 
-    articles = [article for article in articles if article_key(article.url) not in (exclude_urls or set())]
+    articles = [article for article in filter_company_articles(articles)
+                if article_key(article.url) not in (exclude_urls or set())]
     if not articles:
         print("No new articles available")
         return [], []

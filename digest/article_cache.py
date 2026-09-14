@@ -11,6 +11,7 @@ from pathlib import Path
 from digest.models import Article, ArticleStats
 
 CACHE_TTL_SECONDS = 24 * 60 * 60
+CACHE_VERSION = 2  # Invalidate pools collected before official company sources existed.
 
 
 @dataclass
@@ -26,7 +27,7 @@ class ArticleCache:
     def load_fresh(self) -> CachedArticles | None:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            if data["version"] != 1:
+            if data["version"] != CACHE_VERSION:
                 return None
             parsed_at = data["parsed_at"]
             if (not isinstance(parsed_at, (int, float)) or isinstance(parsed_at, bool)
@@ -53,7 +54,7 @@ class ArticleCache:
             return None
 
     def save(self, articles: list[Article]) -> None:
-        data = {"version": 1, "parsed_at": time.time(), "articles": [asdict(a) for a in articles]}
+        data = {"version": CACHE_VERSION, "parsed_at": time.time(), "articles": [asdict(a) for a in articles]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:

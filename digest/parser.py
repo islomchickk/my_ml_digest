@@ -1,5 +1,5 @@
 """
-Сборка статей из RSS-фидов Хабра, Medium, TDS.
+Сборка статей из RSS-фидов и официальных блогов AI-компаний.
 Статистика Хабра извлекается из встроенного JSON (window.__PINIA_STATE__).
 """
 
@@ -13,6 +13,7 @@ import time
 from digest.models import Article, ArticleStats
 from digest.config import DEFAULT_HABR_STATS_LIMIT
 from digest.history import article_key
+from digest.company_sources import COMPANY_FEEDS, HTML_BLOGS, filter_company_articles, parse_company_blog
 
 
 HEADERS = {
@@ -42,6 +43,7 @@ FEEDS = {
     "tds": [
         ("TDS", "https://towardsdatascience.com/feed"),
     ],
+    **COMPANY_FEEDS,
 }
 
 
@@ -101,7 +103,16 @@ def fetch_habr_stats(url: str, client: httpx.Client) -> ArticleStats | None:
 
 
 def parse_feed(url: str, source: str) -> list[Article]:
-    feed = feedparser.parse(url)
+    if url in HTML_BLOGS:
+        return parse_company_blog(url, source)
+    if source in COMPANY_FEEDS:
+        response = httpx.get(url, headers=HEADERS, follow_redirects=True, timeout=20)
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+        if not feed.entries and feed.bozo:
+            raise ValueError("Source did not return a valid RSS/Atom feed")
+    else:
+        feed = feedparser.parse(url)
     articles = []
 
     for entry in feed.entries:
@@ -119,7 +130,7 @@ def parse_feed(url: str, source: str) -> list[Article]:
             preview=preview,
         ))
 
-    return articles
+    return filter_company_articles(articles)
 
 
 def collect_articles(
@@ -136,7 +147,7 @@ def collect_articles(
         for label, url in feeds:
             print(f"[{source}] {label}")
             try:
-                articles = parse_feed(url, source)
+                articles = filter_company_articles(parse_feed(url, source))
             except Exception as e:
                 print(f"  error: {e}")
                 continue

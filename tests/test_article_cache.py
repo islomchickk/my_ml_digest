@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import main
-from digest.article_cache import ArticleCache, CACHE_TTL_SECONDS
+from digest.article_cache import ArticleCache, CACHE_TTL_SECONDS, CACHE_VERSION
 from digest.config import Config
 from digest.models import Article, ArticleStats, DigestEntry
 
@@ -42,9 +42,10 @@ class CacheTests(unittest.TestCase):
         self.assertIsNone(self.cache.load_fresh())
         self.cache.path.parent.mkdir()
         for data in ("not json", "null", "[]", '{"version": 1}',
-                     json.dumps({"version": 1, "parsed_at": True, "articles": []}),
-                     json.dumps({"version": 1, "parsed_at": float("nan"), "articles": []}),
-                     json.dumps({"version": 1, "parsed_at": 1000, "articles": [{}]})):
+                     json.dumps({"version": CACHE_VERSION, "parsed_at": True, "articles": []}),
+                     json.dumps({"version": CACHE_VERSION, "parsed_at": float("nan"), "articles": []}),
+                     json.dumps({"version": CACHE_VERSION, "parsed_at": 1000, "articles": [{}]}),
+                     json.dumps({"version": 1, "parsed_at": 1000, "articles": []})):
             with self.subTest(data=data):
                 self.cache.path.write_text(data)
                 self.assertIsNone(self.cache.load_fresh())
