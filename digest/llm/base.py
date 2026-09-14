@@ -36,6 +36,8 @@ def get_provider(config: Config) -> LLMProvider:
         return NeuralDeepProvider(
             config.neuraldeep_api_key, config.llm_model,
             max_output_tokens=config.neuraldeep_max_output_tokens,
+            enable_thinking=config.neuraldeep_enable_thinking,
+            thinking_token_budget=config.neuraldeep_thinking_token_budget,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {name}")

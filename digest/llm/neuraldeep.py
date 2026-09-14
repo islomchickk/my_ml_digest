@@ -3,7 +3,7 @@ from typing import Any
 
 import openai
 
-from digest.config import DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS
+from digest.config import DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS, DEFAULT_NEURALDEEP_THINKING_TOKEN_BUDGET
 from digest.llm.openai import OpenAIProvider
 from digest.llm.token_budget import fit_article_prompt, request_overhead
 
@@ -22,16 +22,29 @@ class NeuralDeepProvider(OpenAIProvider):
     def __init__(
         self, api_key: str, model: str = "",
         max_output_tokens: int = DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS,
+        enable_thinking: bool = False,
+        thinking_token_budget: int = DEFAULT_NEURALDEEP_THINKING_TOKEN_BUDGET,
     ):
         if not api_key:
             raise ValueError("NEURALDEEP_API_KEY is not set")
         if not 1 <= max_output_tokens <= DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS:
             raise ValueError("NEURALDEEP_MAX_OUTPUT_TOKENS must be between 1 and 8000")
+        if enable_thinking and not 1 <= thinking_token_budget < max_output_tokens:
+            raise ValueError(
+                "NEURALDEEP_THINKING_TOKEN_BUDGET must be positive and less than "
+                "NEURALDEEP_MAX_OUTPUT_TOKENS when thinking is enabled"
+            )
+        self.enable_thinking = enable_thinking
+        self.thinking_token_budget = thinking_token_budget
+        template_kwargs = {"enable_thinking": enable_thinking}
+        if enable_thinking:
+            template_kwargs["thinking_token_budget"] = thinking_token_budget
         super().__init__(
             api_key=api_key,
             model=model or DEFAULT_MODEL,
             base_url=BASE_URL,
             max_output_tokens=max_output_tokens,
+            extra_body={"chat_template_kwargs": template_kwargs},
         )
 
     def complete(
@@ -48,7 +61,9 @@ class NeuralDeepProvider(OpenAIProvider):
                 f"NeuralDeep: {prepared.article_count} articles; estimated input "
                 f"{prepared.estimated_tokens} tokens (budget {budget}, "
                 f"plan limit {MAX_INPUT_TOKENS}; tokenizer estimate); "
-                f"max output {self.max_output_tokens} tokens"
+                f"max output {self.max_output_tokens} tokens; "
+                f"thinking={'on' if self.enable_thinking else 'off'}"
+                + (f" (budget {self.thinking_token_budget} tokens)" if self.enable_thinking else "")
             )
             try:
                 return super().complete(system_prompt, prepared.text, json_schema)

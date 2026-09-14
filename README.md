@@ -146,6 +146,20 @@ docker compose exec digest uv run python main.py
 оборванный ответ сохраняется для диагностики, но не отправляется как дайджест.
 Лимит сам по себе не гарантирует завершение JSON-ответа.
 
+Для Qwen рассуждения отключены по умолчанию: `NEURALDEEP_ENABLE_THINKING=false`.
+В API передаётся `chat_template_kwargs.enable_thinking=false`; модель отвечает
+сразу JSON. Три этапа отбора и формат дайджеста сохраняются, но выбор статей
+может отличаться от режима с рассуждениями.
+Чтобы включить ограниченные рассуждения, задайте `NEURALDEEP_ENABLE_THINKING=true`
+и `NEURALDEEP_THINKING_TOKEN_BUDGET=1024`. Бюджет должен быть положительным и
+меньше общего лимита выхода; он не добавляется сверх 8 000 токенов.
+По [документации NeuralDeep](https://neuraldeep.ru/llms-full.txt), Qwen игнорирует
+`reasoning_effort`, а `chat_template_kwargs.thinking_token_budget` задаёт потолок
+рассуждений. Эти параметры ориентированы на Qwen; при смене семейства модели
+проверьте поддерживаемые настройки в документации провайдера.
+Логи показывают `reasoning_tokens`, если API передаёт этот счётчик, и отдельно
+длину рассуждений и ответа в символах. Символы не являются числом токенов.
+
 Запрос сериализуется без отступов. Если он не помещается, бот сначала сокращает
 превью всех статей, сохраняя названия, ссылки и статистику. Если даже метаданные
 не помещаются, исключает статьи с конца списка. `articles.json` остаётся полным.
@@ -187,6 +201,8 @@ TG_CHANNEL_ID=        # ID канала (опционально)
 LLM_PROVIDER=neuraldeep  # claude | openai | gemini | openrouter | neuraldeep
 LLM_MODEL=qwen3.6-unlim  # модель (опционально, используется дефолтная)
 NEURALDEEP_MAX_OUTPUT_TOKENS=8000  # потолок генерации NeuralDeep
+NEURALDEEP_ENABLE_THINKING=false  # Qwen: сразу отвечать без рассуждений
+NEURALDEEP_THINKING_TOKEN_BUDGET=1024  # применяется при ENABLE_THINKING=true
 
 # API-ключи (заполни только нужный)
 ANTHROPIC_API_KEY=

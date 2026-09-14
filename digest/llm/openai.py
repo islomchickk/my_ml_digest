@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any
 
 import openai
@@ -12,10 +13,12 @@ class OpenAIProvider(LLMProvider):
     def __init__(
         self, api_key: str, model: str = "", base_url: str | None = None,
         max_output_tokens: int | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
         self.model = model or DEFAULT_MODEL
         self.max_output_tokens = max_output_tokens
+        self.extra_body = deepcopy(extra_body)
 
     def complete(
         self,
@@ -32,6 +35,8 @@ class OpenAIProvider(LLMProvider):
         }
         if self.max_output_tokens is not None:
             kwargs["max_tokens"] = self.max_output_tokens
+        if self.extra_body is not None:
+            kwargs["extra_body"] = deepcopy(self.extra_body)
         if json_schema:
             kwargs["response_format"] = {
                 "type": "json_schema",
@@ -47,10 +52,16 @@ class OpenAIProvider(LLMProvider):
             raise LLMResponseError("LLM returned no choices", self.last_response_json)
         choice = response.choices[0]
         usage = response.usage
+        details = getattr(usage, "completion_tokens_details", None)
+        reasoning_tokens = getattr(details, "reasoning_tokens", None)
+        reasoning = getattr(choice.message, "reasoning_content", None)
         print(
             f"LLM response: finish_reason={choice.finish_reason}, "
             f"input_tokens={usage.prompt_tokens if usage else 'unknown'}, "
-            f"output_tokens={usage.completion_tokens if usage else 'unknown'}"
+            f"output_tokens={usage.completion_tokens if usage else 'unknown'}, "
+            f"reasoning_tokens={reasoning_tokens if reasoning_tokens is not None else 'unknown'}, "
+            f"reasoning_chars={len(reasoning) if isinstance(reasoning, str) else 0}, "
+            f"answer_chars={len(choice.message.content or '')}"
         )
         if choice.finish_reason == "length":
             raise LLMResponseError(
