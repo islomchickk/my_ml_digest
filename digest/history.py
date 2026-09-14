@@ -54,6 +54,10 @@ class DigestStore:
                 );
             """)
             connection.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(pages)")}
+            if "digest_id" not in columns:
+                connection.execute("ALTER TABLE pages ADD COLUMN digest_id TEXT")
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS pages_digest_id ON pages(digest_id)")
             migrate = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='delivery_batches'"
             ).fetchone() is None
@@ -118,7 +122,10 @@ class DigestStore:
             connection.executemany("INSERT OR IGNORE INTO sent VALUES (?, ?)",
                                    [(str(chat_id), article_key(entry.url)) for entry in entries])
 
-    def record_delivery(self, chat_id: str, message_id: int, pages: list[str], entries: list[DigestEntry]) -> None:
+    def record_delivery(
+        self, chat_id: str, message_id: int, pages: list[str], entries: list[DigestEntry],
+        *, digest_id: str | None = None,
+    ) -> None:
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             chat_id = str(chat_id)
@@ -132,8 +139,10 @@ class DigestStore:
             previous = {row[0] for row in connection.execute(
                 "SELECT url FROM sent WHERE chat_id = ?", (chat_id,),
             )}
-            connection.execute("INSERT OR REPLACE INTO pages VALUES (?, ?, ?)",
-                               (chat_id, message_id, json.dumps(pages, ensure_ascii=False)))
+            connection.execute(
+                "INSERT INTO pages (chat_id, message_id, content, digest_id) VALUES (?, ?, ?, ?)",
+                (chat_id, message_id, json.dumps(pages, ensure_ascii=False), digest_id),
+            )
             connection.executemany("INSERT OR IGNORE INTO sent VALUES (?, ?)",
                                    [(chat_id, url) for url in urls])
             connection.execute(
@@ -161,10 +170,14 @@ class DigestStore:
             connection.execute("UPDATE delivery_batches SET forgotten = 1 WHERE id = ?", (batch_id,))
             return len(json.loads(urls)), removed
 
-    def load_pages(self, chat_id: str, message_id: int) -> list[str] | None:
+    def load_pages(self, chat_id: str, message_id: int, *, digest_id: str | None = None) -> list[str] | None:
         with self.connect() as connection:
-            row = connection.execute("SELECT content FROM pages WHERE chat_id = ? AND message_id = ?",
-                                     (str(chat_id), message_id)).fetchone()
+            query = "SELECT content FROM pages WHERE chat_id = ? AND message_id = ?"
+            parameters = [str(chat_id), message_id]
+            if digest_id is not None:
+                query += " AND digest_id = ?"
+                parameters.append(digest_id)
+            row = connection.execute(query, parameters).fetchone()
             return json.loads(row[0]) if row else None
 
     @contextmanager

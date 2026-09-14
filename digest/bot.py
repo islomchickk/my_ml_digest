@@ -5,6 +5,7 @@ import asyncio
 import logging
 from html import escape
 from typing import Callable
+from uuid import uuid4
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -91,13 +92,16 @@ def _build_pages(
     return pages if pages else [header]
 
 
-def _build_keyboard(page: int, total: int, include_now: bool = True) -> InlineKeyboardMarkup | None:
+def _build_keyboard(
+    page: int, total: int, include_now: bool = True, *, digest_id: str | None = None,
+) -> InlineKeyboardMarkup | None:
     """Создаёт inline-клавиатуру с кнопками навигации."""
     buttons = []
+    prefix = f"digest_page:{digest_id}:" if digest_id else "digest_page:"
     if page > 0:
-        buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"digest_page:{page - 1}"))
+        buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{prefix}{page - 1}"))
     if page < total - 1:
-        buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"digest_page:{page + 1}"))
+        buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"{prefix}{page + 1}"))
 
     rows = [buttons] if buttons else []
     if include_now:
@@ -110,14 +114,15 @@ async def _send_to_chat(
     entries: list[DigestEntry], mentions: list[DigestEntry] | None = None,
 ) -> None:
     pages = _build_pages(entries, mentions)
+    digest_id = uuid4().hex
     message = await bot.send_message(
         chat_id=chat_id, text=pages[0], parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
-        reply_markup=_build_keyboard(0, len(pages), include_now=int(chat_id) > 0),
+        reply_markup=_build_keyboard(0, len(pages), include_now=int(chat_id) > 0, digest_id=digest_id),
     )
     # Persist only after Telegram accepts the message. The whole digest,
     # including the recommendations on later pages, is considered delivered.
-    store.record_delivery(chat_id, message.message_id, pages, entries + (mentions or []))
+    store.record_delivery(chat_id, message.message_id, pages, entries + (mentions or []), digest_id=digest_id)
 
 
 async def send_digest(
@@ -144,20 +149,27 @@ async def handle_page(callback: CallbackQuery, store: DigestStore) -> None:
     if callback.message is None:
         await callback.answer()
         return
-    pages = store.load_pages(str(callback.message.chat.id), callback.message.message_id)
-    if not pages:
-        await callback.answer("Дайджест устарел")
-        return
     try:
-        page = int(callback.data.split(":", 1)[1])
+        parts = callback.data.split(":")
+        if parts[0] != "digest_page" or len(parts) not in (2, 3):
+            raise ValueError("Invalid pagination callback")
+        digest_id = parts[1] if len(parts) == 3 else None
+        if digest_id == "":
+            raise ValueError("Empty digest ID")
+        page = int(parts[-1])
     except (ValueError, IndexError, AttributeError):
         await callback.answer()
+        return
+    pages = store.load_pages(str(callback.message.chat.id), callback.message.message_id, digest_id=digest_id)
+    if not pages:
+        await callback.answer("Дайджест недоступен")
         return
     await callback.answer()
     if 0 <= page < len(pages):
         await callback.message.edit_text(
             text=pages[page], parse_mode=ParseMode.HTML, disable_web_page_preview=True,
-            reply_markup=_build_keyboard(page, len(pages), include_now=callback.message.chat.id > 0),
+            reply_markup=_build_keyboard(page, len(pages), include_now=callback.message.chat.id > 0,
+                                         digest_id=digest_id),
         )
 
 
