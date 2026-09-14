@@ -22,6 +22,7 @@ class Config:
     # LLM провайдер: claude | openai | gemini | openrouter | neuraldeep
     llm_provider: str = "neuraldeep"
     llm_model: str = ""  # если пусто — используется дефолт провайдера
+    llm_selection_max_attempts: int = 3
     neuraldeep_model_thinking: str = DEFAULT_NEURALDEEP_MODEL_THINKING
     neuraldeep_model_no_thinking: str = DEFAULT_NEURALDEEP_MODEL_NO_THINKING
     neuraldeep_max_output_tokens: int = DEFAULT_NEURALDEEP_MAX_OUTPUT_TOKENS
@@ -47,6 +48,7 @@ class Config:
             tg_channel_id=os.getenv("TG_CHANNEL_ID", ""),
             llm_provider=os.getenv("LLM_PROVIDER", "neuraldeep"),
             llm_model=os.getenv("LLM_MODEL", ""),
+            llm_selection_max_attempts=int(os.getenv("LLM_SELECTION_MAX_ATTEMPTS", "3")),
             neuraldeep_model_thinking=(os.getenv("NEURALDEEP_MODEL_THINKING", "").strip()
                                       or DEFAULT_NEURALDEEP_MODEL_THINKING),
             neuraldeep_model_no_thinking=(os.getenv("NEURALDEEP_MODEL_NO_THINKING", "").strip()

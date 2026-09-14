@@ -139,26 +139,36 @@ def generate_digest(
         path.unlink(missing_ok=True)
         for stage in range(1, 4):
             path.with_name(f"{path.stem}_stage_{stage}{path.suffix}").unlink(missing_ok=True)
+            for attempt_path in path.parent.glob(f"{path.stem}_stage_{stage}_attempt_*{path.suffix}"):
+                attempt_path.unlink()
 
+    stage_attempts = {}
     def complete_stage(stage, system_prompt, user_prompt, schema):
+        attempt = stage_attempts.get(stage, 0) + 1
+        stage_attempts[stage] = attempt
         stage_text = LLM_RESPONSE_FILE.with_name(f"{LLM_RESPONSE_FILE.stem}_stage_{stage}{LLM_RESPONSE_FILE.suffix}")
         stage_api = LLM_API_RESPONSE_FILE.with_name(f"{LLM_API_RESPONSE_FILE.stem}_stage_{stage}{LLM_API_RESPONSE_FILE.suffix}")
+        attempt_text = stage_text.with_name(f"{stage_text.stem}_attempt_{attempt}{stage_text.suffix}")
+        attempt_api = stage_api.with_name(f"{stage_api.stem}_attempt_{attempt}{stage_api.suffix}")
         try:
             response = provider.complete(system_prompt, user_prompt, json_schema=schema)
         except LLMResponseError as error:
             LLM_API_RESPONSE_FILE.write_text(error.raw_response, encoding="utf-8")
             stage_api.write_text(error.raw_response, encoding="utf-8")
+            attempt_api.write_text(error.raw_response, encoding="utf-8")
             print(f"LLM stage {stage}/3 error: {error}. Raw API response saved to {stage_api}")
             raise
         LLM_RESPONSE_FILE.write_text(response, encoding="utf-8")
         stage_text.write_text(response, encoding="utf-8")
+        attempt_text.write_text(response, encoding="utf-8")
         api_response = getattr(provider, "last_response_json", None)
         if api_response:
             LLM_API_RESPONSE_FILE.write_text(api_response, encoding="utf-8")
             stage_api.write_text(api_response, encoding="utf-8")
+            attempt_api.write_text(api_response, encoding="utf-8")
         return response
 
-    entries, mentions = select_in_stages(articles, complete_stage)
+    entries, mentions = select_in_stages(articles, complete_stage, max_attempts=config.llm_selection_max_attempts)
     # The complete aggregate stays compatible with the saved-response recovery.
     LLM_RESPONSE_FILE.write_text(json.dumps({
         "top": [asdict(entry) for entry in entries],

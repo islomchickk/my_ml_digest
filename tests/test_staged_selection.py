@@ -66,10 +66,67 @@ class StagedSelectionTests(unittest.TestCase):
     def test_repeated_unknown_and_duplicate_choices_cannot_fill_second_half(self):
         items = articles(15)
         invalid = [items[0], items[5], items[5], Article("Unknown", "https://unknown.com/a", "habr", "", "")]
-        complete = Mock(side_effect=[answer(items[:5]), answer(invalid)])
-        with self.assertRaisesRegex(ValueError, "stage 2/3.*expected 5 valid articles"):
+        complete = Mock(side_effect=[answer(items[:5])] + [answer(invalid)] * 3)
+        with self.assertRaisesRegex(ValueError, "stage 2/3 failed after 3 attempts.*expected 5 valid articles"):
             select_in_stages(items, complete)
-        self.assertEqual(complete.call_count, 2)
+        self.assertEqual(complete.call_count, 4)
+
+    def test_short_second_half_is_completed_without_repeating_valid_choices(self):
+        items = articles(20)
+        complete = Mock(side_effect=[answer(items[:5]), answer(items[5:9]),
+                                     answer(items[9:10]), answer(items[10:14], True)])
+        top, mentions = select_in_stages(items, complete)
+        self.assertEqual([e.url for e in top], [a.url for a in items[:10]])
+        self.assertEqual(len(mentions), 4)
+        retry = complete.call_args_list[2]
+        self.assertEqual(retry.args[0], 2)
+        self.assertEqual(retry.args[3]["properties"]["articles"]["minItems"], 1)
+        self.assertEqual({a["url"] for a in json.loads(retry.args[2])},
+                         {a.url for a in items[9:]})
+        for item in items[:9]:
+            self.assertIn(item.url, retry.args[1])
+        self.assertIn("expected 5 valid articles, received 4", retry.args[1])
+
+    def test_malformed_json_retry_retains_choices_from_previous_attempt(self):
+        items = articles(15)
+        complete = Mock(side_effect=[answer(items[:4]), "not JSON", answer(items[4:5]),
+                                     answer(items[5:10]), answer([], True)])
+        top, mentions = select_in_stages(items, complete)
+        self.assertEqual(len(top), 10)
+        self.assertEqual(mentions, [])
+        for retry in complete.call_args_list[1:3]:
+            self.assertEqual(retry.args[3]["properties"]["articles"]["maxItems"], 1)
+            self.assertEqual({a["url"] for a in json.loads(retry.args[2])},
+                             {a.url for a in items[4:]})
+
+    def test_invalid_recommendations_retry_but_empty_recommendations_stop(self):
+        items = articles(15)
+        unknown = Article("Unknown", "https://unknown.com/a", "habr", "", "")
+        complete = Mock(side_effect=[answer(items[:5]), answer(items[5:10]),
+                                     answer([unknown], True), answer([], True)])
+        top, mentions = select_in_stages(items, complete)
+        self.assertEqual((len(top), len(mentions)), (10, 0))
+        self.assertEqual([c.args[0] for c in complete.call_args_list], [1, 2, 3, 3])
+
+    def test_attempt_setting_is_bounded_and_one_attempt_disables_retries(self):
+        items = articles(5)
+        for count in (0, 11):
+            complete = Mock()
+            with self.assertRaisesRegex(ValueError, "MAX_ATTEMPTS"):
+                select_in_stages(items, complete, max_attempts=count)
+            complete.assert_not_called()
+        complete = Mock(return_value=answer(items[:4]))
+        with self.assertRaisesRegex(ValueError, "after 1 attempts"):
+            select_in_stages(items, complete, max_attempts=1)
+        self.assertEqual(complete.call_count, 1)
+
+    def test_duplicate_input_urls_do_not_inflate_required_selection(self):
+        items = articles(3)
+        complete = Mock(return_value=answer(items))
+        top, mentions = select_in_stages([items[0], items[1], items[0], items[2]], complete)
+        self.assertEqual([e.url for e in top], [a.url for a in items])
+        self.assertEqual(mentions, [])
+        self.assertEqual(complete.call_count, 1)
 
 
 class StageDiagnosticsTests(unittest.TestCase):
@@ -112,6 +169,32 @@ class StageDiagnosticsTests(unittest.TestCase):
         self.assertEqual(json.loads((root / "llm_response_stage_2.json").read_text()), {"finish_reason": "length"})
         self.assertTrue((root / "llm_response_stage_1.txt").exists())
         self.assertFalse((root / "llm_response_stage_3.txt").exists())
+
+    def test_retry_snapshots_preserve_both_failed_and_repaired_response(self):
+        items = articles(10)
+        short, repair = answer(items[5:9]), answer(items[9:10])
+        provider = SimpleNamespace(complete=Mock(side_effect=[answer(items[:5]), short, repair]),
+                                   last_response_json='{"model": "test"}')
+        with patch.object(main, "collect_articles", return_value=items), \
+                patch.object(main, "get_provider", return_value=provider):
+            top, mentions = main.generate_digest(Config())
+        self.assertEqual((len(top), len(mentions)), (10, 0))
+        root = Path(self.directory.name)
+        self.assertEqual((root / "llm_response_stage_2_attempt_1.txt").read_text(), short)
+        self.assertEqual((root / "llm_response_stage_2_attempt_2.txt").read_text(), repair)
+        self.assertEqual((root / "llm_response_stage_2.txt").read_text(), repair)
+
+    def test_exhausted_retry_does_not_overwrite_last_digest(self):
+        items = articles(10)
+        main.DIGEST_OUTPUT_FILE.write_text("previous digest")
+        provider = SimpleNamespace(complete=Mock(side_effect=[answer(items[:5])] + ["not JSON"] * 2),
+                                   last_response_json='{"model": "test"}')
+        with patch.object(main, "collect_articles", return_value=items), \
+                patch.object(main, "get_provider", return_value=provider):
+            with self.assertRaisesRegex(ValueError, "stage 2/3 failed after 2 attempts"):
+                main.generate_digest(Config(llm_selection_max_attempts=2))
+        self.assertEqual(main.DIGEST_OUTPUT_FILE.read_text(), "previous digest")
+        self.assertEqual(provider.complete.call_count, 3)
 
 
 if __name__ == "__main__":
