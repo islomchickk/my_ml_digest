@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_HABR_STATS_LIMIT = 50
+
 
 @dataclass
 class Config:
@@ -26,6 +28,7 @@ class Config:
 
     # Парсер
     fetch_habr_stats: bool = True
+    habr_stats_limit: int = DEFAULT_HABR_STATS_LIMIT
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -41,4 +44,5 @@ class Config:
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             neuraldeep_api_key=os.getenv("NEURALDEEP_API_KEY", ""),
             fetch_habr_stats=os.getenv("FETCH_HABR_STATS", "true").lower() == "true",
+            habr_stats_limit=int(os.getenv("HABR_STATS_LIMIT", str(DEFAULT_HABR_STATS_LIMIT))),
         )

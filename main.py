@@ -113,7 +113,9 @@ def main():
         print(f"Loaded {len(articles)} articles")
     else:
         print("=== Collecting articles ===")
-        articles = collect_articles(fetch_stats=config.fetch_habr_stats)
+        articles = collect_articles(
+            fetch_stats=config.fetch_habr_stats, habr_stats_limit=config.habr_stats_limit,
+        )
 
         # Save articles to articles.json
         articles_data = [asdict(a) for a in articles]
