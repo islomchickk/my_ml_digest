@@ -2,7 +2,10 @@ services:
   digest:
     build: .
     env_file: .env
-    command: tail -f /dev/null  # keep alive for ofelia job-exec
+    command: uv run python main.py --bot
+    restart: unless-stopped
+    volumes:
+      - digest-data:/app/data
     labels:
       ofelia.enabled: "true"
       ofelia.job-exec.digest.schedule: "0 0 9 * * 1"  # every Monday at 09:00
@@ -15,3 +18,6 @@ services:
     command: daemon --docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  digest-data:

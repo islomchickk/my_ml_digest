@@ -10,6 +10,8 @@ Digest: сбор статей → фильтрация LLM → отправка 
     uv run python main.py --no-stats         # без статистики Хабра
     uv run python main.py --dry-run          # без отправки в Telegram
     uv run python main.py --test-send        # отправить digest_output.json в TG_CHAT_ID
+    uv run python main.py --bot              # постоянно обслуживать кнопки Telegram
+    uv run python main.py --remember-sent    # импортировать уже отправленный дайджест в историю
 """
 
 import argparse
@@ -24,7 +26,8 @@ from digest.parser import collect_articles
 from digest.llm import get_provider
 from digest.llm.errors import LLMResponseError
 from digest.llm.prompt import SYSTEM_PROMPT, RESPONSE_SCHEMA, build_user_prompt, parse_llm_response
-from digest.bot import send_digest
+from digest.bot import send_digest, run_bot
+from digest.history import DigestStore, article_key
 from digest.models import Article, ArticleStats, DigestEntry
 
 ARTICLES_FILE = Path("articles.json")
@@ -82,35 +85,15 @@ def _test_send(config: Config) -> None:
     print("Done!")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Weekly article digest")
-    parser.add_argument(
-        "--llm",
-        type=str,
-        help="LLM provider: claude, openai, gemini, openrouter, neuraldeep",
-    )
-    parser.add_argument("--no-stats", action="store_true", help="Skip fetching Habr stats")
-    parser.add_argument("--dry-run", action="store_true", help="Don't send to Telegram")
-    parser.add_argument("--no-parse", action="store_true", help="Skip parsing, load from articles.json")
-    parser.add_argument("--test-send", action="store_true", help="Send digest from digest_output.json to TG_CHAT_ID only (bypass parser & LLM)")
-    args = parser.parse_args()
-
-    config = Config.from_env()
-
-    if args.test_send:
-        _test_send(config)
-        return
-    if args.llm:
-        config.llm_provider = args.llm
-    if args.no_stats:
-        config.fetch_habr_stats = False
-
+def generate_digest(
+    config: Config, no_parse: bool = False, exclude_urls: set[str] | None = None,
+) -> tuple[list[DigestEntry], list[DigestEntry]]:
     # 1. Collect articles
-    if args.no_parse:
+    if no_parse:
         print("=== Loading articles from articles.json ===")
         if not ARTICLES_FILE.exists():
             print("articles.json not found, nothing to process.")
-            sys.exit(0)
+            return [], []
         with open(ARTICLES_FILE, "r", encoding="utf-8") as f:
             raw = json.load(f)
         articles = [
@@ -131,6 +114,7 @@ def main():
         print("=== Collecting articles ===")
         articles = collect_articles(
             fetch_stats=config.fetch_habr_stats, habr_stats_limit=config.habr_stats_limit,
+            exclude_urls=exclude_urls,
         )
 
         # Save articles to articles.json
@@ -138,6 +122,11 @@ def main():
         with open(ARTICLES_FILE, "w", encoding="utf-8") as f:
             json.dump(articles_data, f, ensure_ascii=False, indent=2)
         print(f"Saved {len(articles)} articles to articles.json")
+
+    articles = [article for article in articles if article_key(article.url) not in (exclude_urls or set())]
+    if not articles:
+        print("No new articles available")
+        return [], []
 
     # 2. LLM filter + summarize
     print(f"\n=== Filtering with LLM ({config.llm_provider}) ===")
@@ -153,7 +142,7 @@ def main():
     except LLMResponseError as error:
         LLM_API_RESPONSE_FILE.write_text(error.raw_response, encoding="utf-8")
         print(f"LLM error: {error}. Raw API response saved to {LLM_API_RESPONSE_FILE}")
-        sys.exit(1)
+        raise
 
     LLM_RESPONSE_FILE.write_text(response, encoding="utf-8")
     api_response = getattr(provider, "last_response_json", None)
@@ -163,7 +152,21 @@ def main():
         entries, mentions = parse_llm_response(response, articles)
     except ValueError as error:
         print(f"LLM error: {error}. Raw answer saved to {LLM_RESPONSE_FILE}")
-        sys.exit(1)
+        raise
+    available_urls = {article_key(article.url) for article in articles}
+    selected_urls: set[str] = set()
+
+    def valid_entries(items: list[DigestEntry]) -> list[DigestEntry]:
+        selected = []
+        for entry in items:
+            key = article_key(entry.url)
+            if key in available_urls and key not in selected_urls:
+                selected_urls.add(key)
+                selected.append(entry)
+        return selected
+    entries, mentions = valid_entries(entries), valid_entries(mentions)
+    if not entries:
+        raise ValueError("LLM selected no articles from the supplied candidates")
     print(f"LLM selected {len(entries)} articles + {len(mentions)} honorable mentions\n")
 
     for i, e in enumerate(entries, 1):
@@ -182,28 +185,58 @@ def main():
     _save_digest(entries, mentions)
     print("Saved to digest_output.json")
 
-    # 4. Send to Telegram
-    if args.dry_run:
-        print("\n--dry-run: skipping Telegram send")
-        return
+    return entries, mentions
 
-    chat_ids = []
-    if config.tg_chat_id:
-        chat_ids.append(config.tg_chat_id)
-    if config.tg_channel_id:
-        chat_ids.append(config.tg_channel_id)
 
-    if not chat_ids:
-        print("\nNo TG_CHAT_ID or TG_CHANNEL_ID set, skipping Telegram send")
-        return
-
-    if not config.tg_bot_token:
-        print("\nNo TG_BOT_TOKEN set, skipping Telegram send")
-        return
-
-    print(f"\nSending digest to {len(chat_ids)} chat(s)...")
-    asyncio.run(send_digest(entries, config.tg_bot_token, chat_ids, mentions))
-    print("Done!")
+def main():
+    parser = argparse.ArgumentParser(description="Weekly article digest")
+    parser.add_argument("--llm", type=str, help="LLM provider")
+    parser.add_argument("--no-stats", action="store_true", help="Skip fetching Habr stats")
+    parser.add_argument("--dry-run", action="store_true", help="Don't send to Telegram")
+    parser.add_argument("--no-parse", action="store_true", help="Load articles.json instead of RSS")
+    parser.add_argument("--test-send", action="store_true", help="Send saved digest to TG_CHAT_ID")
+    parser.add_argument("--bot", action="store_true", help="Listen for Telegram buttons continuously")
+    parser.add_argument("--remember-sent", action="store_true", help="Import the saved digest into TG_CHAT_ID delivery history")
+    args = parser.parse_args()
+    config = Config.from_env()
+    if args.llm:
+        config.llm_provider = args.llm
+    if args.no_stats:
+        config.fetch_habr_stats = False
+    try:
+        if args.test_send:
+            _test_send(config)
+            return
+        store = DigestStore()
+        if args.remember_sent:
+            if not config.tg_chat_id:
+                raise ValueError("TG_CHAT_ID not set")
+            entries, mentions = _load_saved_digest()
+            store.remember(config.tg_chat_id, entries + mentions)
+            print(f"Remembered {len(entries) + len(mentions)} previously sent articles")
+            return
+        if args.bot:
+            asyncio.run(run_bot(config, lambda excluded: generate_digest(config, exclude_urls=excluded), store))
+            return
+        with store.generation_lock():
+            history_chat = config.tg_chat_id or config.tg_channel_id
+            excluded = store.sent_urls(history_chat) if history_chat else set()
+            entries, mentions = generate_digest(config, args.no_parse, excluded)
+            if not entries:
+                return
+            if args.dry_run:
+                print("\n--dry-run: skipping Telegram send")
+                return
+            chat_ids = [chat for chat in (config.tg_chat_id, config.tg_channel_id) if chat]
+            if not chat_ids or not config.tg_bot_token:
+                print("Telegram credentials not configured, skipping send")
+                return
+            print(f"\nSending digest to {len(chat_ids)} chat(s)...")
+            asyncio.run(send_digest(entries, config.tg_bot_token, chat_ids, mentions))
+            print("Done!")
+    except (ValueError, RuntimeError, OSError) as error:
+        print(f"Digest error: {error}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

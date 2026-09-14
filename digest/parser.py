@@ -12,6 +12,7 @@ import time
 
 from digest.models import Article, ArticleStats
 from digest.config import DEFAULT_HABR_STATS_LIMIT
+from digest.history import article_key
 
 
 HEADERS = {
@@ -123,6 +124,7 @@ def parse_feed(url: str, source: str) -> list[Article]:
 
 def collect_articles(
     fetch_stats: bool = True, habr_stats_limit: int = DEFAULT_HABR_STATS_LIMIT,
+    exclude_urls: set[str] | None = None,
 ) -> list[Article]:
     """Собирает все статьи из RSS и обогащает статистикой Хабра."""
     if habr_stats_limit < 0:
@@ -141,8 +143,9 @@ def collect_articles(
 
             new_count = 0
             for art in articles:
-                if art.url not in seen_urls:
-                    seen_urls.add(art.url)
+                key = article_key(art.url)
+                if key not in seen_urls and key not in (exclude_urls or set()):
+                    seen_urls.add(key)
                     all_articles.append(art)
                     new_count += 1
 
