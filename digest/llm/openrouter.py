@@ -7,7 +7,7 @@ from digest.llm.base import LLMProvider
 DEFAULT_MODEL = "anthropic/claude-sonnet-4"
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-JSON_INSTRUCTION = "\n\nОтветь строго в формате JSON-массива, без markdown-обёртки."
+JSON_INSTRUCTION = "\n\nОтветь строго в формате JSON, указанном в системном промпте, без markdown-обёртки."
 
 
 class OpenRouterProvider(LLMProvider):

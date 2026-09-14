@@ -237,8 +237,8 @@ class GenerationTests(unittest.TestCase):
     def test_generation_filters_seen_unknown_and_duplicate_selections(self):
         old = Article("Old", "https://example.com/old", "habr", "", "")
         new = Article("New", entry().url, "habr", "", "")
-        answer = {"top": [asdict(entry(old.url)), asdict(entry()), asdict(entry("https://example.com/invented"))],
-                  "honorable_mentions": [asdict(entry())]}
+        answer = {"articles": [asdict(entry(old.url)), asdict(entry()),
+                               asdict(entry("https://example.com/invented")), asdict(entry())]}
         provider = SimpleNamespace(complete=Mock(return_value=json.dumps(answer)), last_response_json=None)
         with patch.object(main, "collect_articles", return_value=[old, new]), patch.object(main, "get_provider", return_value=provider):
             entries, mentions = main.generate_digest(Config(fetch_habr_stats=False), exclude_urls={old.url})

@@ -25,7 +25,8 @@ from digest.config import Config
 from digest.parser import collect_articles
 from digest.llm import get_provider
 from digest.llm.errors import LLMResponseError
-from digest.llm.prompt import SYSTEM_PROMPT, RESPONSE_SCHEMA, build_user_prompt, parse_llm_response
+from digest.llm.prompt import parse_llm_response
+from digest.llm.selection import select_in_stages
 from digest.bot import send_digest, run_bot
 from digest.history import DigestStore, article_key
 from digest.models import Article, ArticleStats, DigestEntry
@@ -131,42 +132,37 @@ def generate_digest(
     # 2. LLM filter + summarize
     print(f"\n=== Filtering with LLM ({config.llm_provider}) ===")
     provider = get_provider(config)
-    user_prompt = build_user_prompt(articles)
+    # Preserve each stage for diagnosis and keep the legacy paths pointing to
+    # the latest response while generation is in progress.
+    for path in (LLM_RESPONSE_FILE, LLM_API_RESPONSE_FILE):
+        path.unlink(missing_ok=True)
+        for stage in range(1, 4):
+            path.with_name(f"{path.stem}_stage_{stage}{path.suffix}").unlink(missing_ok=True)
 
-    print(f"Sending {len(articles)} articles to LLM...")
-    # Remove previous diagnostics so a failed new request cannot leave stale data.
-    LLM_RESPONSE_FILE.unlink(missing_ok=True)
-    LLM_API_RESPONSE_FILE.unlink(missing_ok=True)
-    try:
-        response = provider.complete(SYSTEM_PROMPT, user_prompt, json_schema=RESPONSE_SCHEMA)
-    except LLMResponseError as error:
-        LLM_API_RESPONSE_FILE.write_text(error.raw_response, encoding="utf-8")
-        print(f"LLM error: {error}. Raw API response saved to {LLM_API_RESPONSE_FILE}")
-        raise
+    def complete_stage(stage, system_prompt, user_prompt, schema):
+        stage_text = LLM_RESPONSE_FILE.with_name(f"{LLM_RESPONSE_FILE.stem}_stage_{stage}{LLM_RESPONSE_FILE.suffix}")
+        stage_api = LLM_API_RESPONSE_FILE.with_name(f"{LLM_API_RESPONSE_FILE.stem}_stage_{stage}{LLM_API_RESPONSE_FILE.suffix}")
+        try:
+            response = provider.complete(system_prompt, user_prompt, json_schema=schema)
+        except LLMResponseError as error:
+            LLM_API_RESPONSE_FILE.write_text(error.raw_response, encoding="utf-8")
+            stage_api.write_text(error.raw_response, encoding="utf-8")
+            print(f"LLM stage {stage}/3 error: {error}. Raw API response saved to {stage_api}")
+            raise
+        LLM_RESPONSE_FILE.write_text(response, encoding="utf-8")
+        stage_text.write_text(response, encoding="utf-8")
+        api_response = getattr(provider, "last_response_json", None)
+        if api_response:
+            LLM_API_RESPONSE_FILE.write_text(api_response, encoding="utf-8")
+            stage_api.write_text(api_response, encoding="utf-8")
+        return response
 
-    LLM_RESPONSE_FILE.write_text(response, encoding="utf-8")
-    api_response = getattr(provider, "last_response_json", None)
-    if api_response:
-        LLM_API_RESPONSE_FILE.write_text(api_response, encoding="utf-8")
-    try:
-        entries, mentions = parse_llm_response(response, articles)
-    except ValueError as error:
-        print(f"LLM error: {error}. Raw answer saved to {LLM_RESPONSE_FILE}")
-        raise
-    available_urls = {article_key(article.url) for article in articles}
-    selected_urls: set[str] = set()
-
-    def valid_entries(items: list[DigestEntry]) -> list[DigestEntry]:
-        selected = []
-        for entry in items:
-            key = article_key(entry.url)
-            if key in available_urls and key not in selected_urls:
-                selected_urls.add(key)
-                selected.append(entry)
-        return selected
-    entries, mentions = valid_entries(entries), valid_entries(mentions)
-    if not entries:
-        raise ValueError("LLM selected no articles from the supplied candidates")
+    entries, mentions = select_in_stages(articles, complete_stage)
+    # The complete aggregate stays compatible with the saved-response recovery.
+    LLM_RESPONSE_FILE.write_text(json.dumps({
+        "top": [asdict(entry) for entry in entries],
+        "honorable_mentions": [asdict(mention) for mention in mentions],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"LLM selected {len(entries)} articles + {len(mentions)} honorable mentions\n")
 
     for i, e in enumerate(entries, 1):

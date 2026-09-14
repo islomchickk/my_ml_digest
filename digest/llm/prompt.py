@@ -4,6 +4,8 @@ import json
 import re
 
 from digest.models import Article, DigestEntry
+from dataclasses import asdict
+from typing import Any
 
 SYSTEM_PROMPT = """\
 Ты — AI-ассистент, который помогает составить еженедельный дайджест статей по Data Science, ML, AI и разработке.
@@ -84,6 +86,48 @@ RESPONSE_SCHEMA = {
 }
 
 
+def build_stage_schema(count: int, mentions: bool = False) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "articles": {
+                "type": "array", "items": _MENTION_SCHEMA if mentions else _ARTICLE_SCHEMA,
+                "minItems": 0 if mentions else count, "maxItems": count,
+            },
+        },
+        "required": ["articles"], "additionalProperties": False,
+    }
+
+
+def build_stage_system_prompt(stage: int, count: int, selected: list[DigestEntry]) -> str:
+    mentions = stage == 3
+    goal = (f"Выбери до {count} дополнительных рекомендаций для раздела «Также может быть интересно»."
+            if mentions else f"Выбери {count} статей для {'первой' if stage == 1 else 'второй'} половины топ-10.")
+    details = ("Для каждой напиши одно короткое предложение на русском и верни title, url, source, summary."
+               if mentions else "Для каждой напиши саммари на русском (2-3 предложения), укажи тему и подтему "
+               "в category, например «LLM (RAG)». Верни title, url, source, author, tags, summary, category.")
+    previous = [
+        {key: value for key, value in asdict(entry).items() if key != "stats"}
+        for entry in selected
+    ]
+    criteria = SYSTEM_PROMPT[SYSTEM_PROMPT.index("Приоритет тематик"):].strip()
+    return f"""Ты составляешь дайджест по Data Science, ML, AI и разработке. Сейчас этап {stage}/3.
+В пользовательском сообщении — JSON-массив оставшихся статей-кандидатов.
+{goal}
+{details}
+Выбирай только из кандидатов текущего этапа. Не выдумывай ссылки и не повторяй уже выбранные статьи.
+Учитывай предыдущий выбор для разнообразия тем и источников. Верни только результат текущего этапа.
+Формат ответа: только JSON-объект с единственным ключом articles и массивом выбранных статей.
+Без Markdown-обёрток, вступлений и рассуждений вне JSON.
+{"Если подходящих дополнительных рекомендаций нет, верни пустой articles." if mentions else ""}
+
+{criteria}
+
+Уже выбрано на предыдущих этапах (это контекст, а не кандидаты):
+{json.dumps(previous, ensure_ascii=False, separators=(',', ':'))}
+"""
+
+
 def build_user_prompt(articles: list[Article]) -> str:
     items = []
     for art in articles:
@@ -137,10 +181,8 @@ def _parse_entries(items: list[dict], url_to_article: dict[str, Article]) -> lis
     return entries
 
 
-def parse_llm_response(
-    response: str, articles: list[Article],
-) -> tuple[list[DigestEntry], list[DigestEntry]]:
-    """Парсим JSON-ответ LLM. Возвращает (top_10, honorable_mentions)."""
+def decode_llm_json(response: str) -> Any:
+    """Decode JSON with recognized Markdown/reasoning wrappers."""
     text = response.strip().lstrip("\ufeff").strip()
     # Remove only recognized wrappers. Don't guess at malformed/truncated JSON
     # or extract unrelated objects from arbitrary prose.
@@ -155,11 +197,25 @@ def parse_llm_response(
     if not text:
         raise ValueError("LLM returned an empty answer instead of JSON")
     try:
-        data = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError as error:
         raise ValueError(
             f"LLM answer is not valid JSON (line {error.lineno}, column {error.colno}): {error.msg}"
         ) from error
+
+
+def parse_stage_response(response: str, articles: list[Article]) -> list[DigestEntry]:
+    data = decode_llm_json(response)
+    if not isinstance(data, dict) or set(data) != {"articles"}:
+        raise ValueError("LLM stage answer must contain only the articles array")
+    return _parse_entries(data["articles"], {a.url: a for a in articles})
+
+
+def parse_llm_response(
+    response: str, articles: list[Article],
+) -> tuple[list[DigestEntry], list[DigestEntry]]:
+    """Парсим JSON-ответ LLM. Возвращает (top_10, honorable_mentions)."""
+    data = decode_llm_json(response)
     url_to_article = {a.url: a for a in articles}
 
     # New format: {"top": [...], "honorable_mentions": [...]}

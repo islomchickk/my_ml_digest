@@ -6,7 +6,7 @@ from digest.llm.base import LLMProvider
 
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
 
-JSON_INSTRUCTION = "\n\nОтветь строго в формате JSON-массива, без markdown-обёртки."
+JSON_INSTRUCTION = "\n\nОтветь строго в формате JSON, указанном в системном промпте, без markdown-обёртки."
 
 
 class ClaudeProvider(LLMProvider):
