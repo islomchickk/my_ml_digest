@@ -22,6 +22,7 @@ from pathlib import Path
 from digest.config import Config
 from digest.parser import collect_articles
 from digest.llm import get_provider
+from digest.llm.errors import LLMResponseError
 from digest.llm.prompt import SYSTEM_PROMPT, RESPONSE_SCHEMA, build_user_prompt, parse_llm_response
 from digest.bot import send_digest
 from digest.models import Article, ArticleStats, DigestEntry
@@ -30,6 +31,8 @@ ARTICLES_FILE = Path("articles.json")
 
 
 DIGEST_OUTPUT_FILE = Path("digest_output.json")
+LLM_RESPONSE_FILE = Path("llm_response.txt")
+LLM_API_RESPONSE_FILE = Path("llm_response.json")
 
 
 def _test_send(config: Config) -> None:
@@ -124,9 +127,25 @@ def main():
     user_prompt = build_user_prompt(articles)
 
     print(f"Sending {len(articles)} articles to LLM...")
-    response = provider.complete(SYSTEM_PROMPT, user_prompt, json_schema=RESPONSE_SCHEMA)
+    # Remove previous diagnostics so a failed new request cannot leave stale data.
+    LLM_RESPONSE_FILE.unlink(missing_ok=True)
+    LLM_API_RESPONSE_FILE.unlink(missing_ok=True)
+    try:
+        response = provider.complete(SYSTEM_PROMPT, user_prompt, json_schema=RESPONSE_SCHEMA)
+    except LLMResponseError as error:
+        LLM_API_RESPONSE_FILE.write_text(error.raw_response, encoding="utf-8")
+        print(f"LLM error: {error}. Raw API response saved to {LLM_API_RESPONSE_FILE}")
+        sys.exit(1)
 
-    entries, mentions = parse_llm_response(response, articles)
+    LLM_RESPONSE_FILE.write_text(response, encoding="utf-8")
+    api_response = getattr(provider, "last_response_json", None)
+    if api_response:
+        LLM_API_RESPONSE_FILE.write_text(api_response, encoding="utf-8")
+    try:
+        entries, mentions = parse_llm_response(response, articles)
+    except ValueError as error:
+        print(f"LLM error: {error}. Raw answer saved to {LLM_RESPONSE_FILE}")
+        sys.exit(1)
     print(f"LLM selected {len(entries)} articles + {len(mentions)} honorable mentions\n")
 
     for i, e in enumerate(entries, 1):

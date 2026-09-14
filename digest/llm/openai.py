@@ -3,6 +3,7 @@ from typing import Any
 import openai
 
 from digest.llm.base import LLMProvider
+from digest.llm.errors import LLMResponseError
 
 DEFAULT_MODEL = "gpt-4o-mini"
 
@@ -35,4 +36,34 @@ class OpenAIProvider(LLMProvider):
                 },
             }
         response = self.client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content or ""
+        self.last_response_json = response.model_dump_json(indent=2)
+        if not response.choices:
+            raise LLMResponseError("LLM returned no choices", self.last_response_json)
+        choice = response.choices[0]
+        usage = response.usage
+        print(
+            f"LLM response: finish_reason={choice.finish_reason}, "
+            f"input_tokens={usage.prompt_tokens if usage else 'unknown'}, "
+            f"output_tokens={usage.completion_tokens if usage else 'unknown'}"
+        )
+        if choice.finish_reason == "length":
+            raise LLMResponseError(
+                "LLM output was truncated (finish_reason=length); "
+                "the output token limit was reached before completion",
+                self.last_response_json,
+            )
+        if choice.message.refusal:
+            raise LLMResponseError("LLM refused the request", self.last_response_json)
+        if choice.finish_reason != "stop":
+            raise LLMResponseError(
+                f"LLM returned an incomplete answer (finish_reason={choice.finish_reason})",
+                self.last_response_json,
+            )
+        content = choice.message.content
+        if not content or not content.strip():
+            raise LLMResponseError(
+                "LLM returned empty message.content; inspect the saved API response "
+                "for reasoning_content and token usage",
+                self.last_response_json,
+            )
+        return content

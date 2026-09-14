@@ -1,6 +1,7 @@
 """Промпт для LLM: фильтрация + саммаризация статей."""
 
 import json
+import re
 
 from digest.models import Article, DigestEntry
 
@@ -18,6 +19,11 @@ SYSTEM_PROMPT = """\
    Список тем неисчерпывающий — можешь предложить свою, если статья не вписывается в стандартные.
 4. Дополнительно выбрать 3-4 статьи, которые не вошли в топ-10, но тоже могут быть интересны.
    Для них написать одно короткое предложение — о чём статья.
+
+Формат ответа: только JSON-объект с ключами top и honorable_mentions.
+Каждый элемент top содержит title, url, source, author, tags, summary, category.
+Каждый элемент honorable_mentions содержит title, url, source, summary.
+Без Markdown-обёрток, вступлений и рассуждений вне JSON.
 
 Приоритет тематик (от высшего к низшему):
 1. LLM — агенты, skills, MCP, RAG, fine-tuning, prompt engineering, инференс
@@ -100,8 +106,21 @@ def build_user_prompt(articles: list[Article]) -> str:
 
 
 def _parse_entries(items: list[dict], url_to_article: dict[str, Article]) -> list[DigestEntry]:
+    if not isinstance(items, list):
+        raise ValueError("LLM article entries must be a JSON array")
     entries = []
     for item in items:
+        if not isinstance(item, dict) or not all(
+            isinstance(item.get(key), str) and item[key].strip()
+            for key in ("title", "url", "source", "summary")
+        ):
+            raise ValueError("LLM article must contain non-empty title, url, source and summary")
+        if not isinstance(item.get("tags", []), list) or not all(
+            isinstance(tag, str) for tag in item.get("tags", [])
+        ):
+            raise ValueError("LLM article tags must be an array of strings")
+        if not all(isinstance(item.get(key, ""), str) for key in ("author", "category")):
+            raise ValueError("LLM article author and category must be strings")
         url = item.get("url", "")
         original = url_to_article.get(url)
         entries.append(DigestEntry(
@@ -121,16 +140,41 @@ def parse_llm_response(
     response: str, articles: list[Article],
 ) -> tuple[list[DigestEntry], list[DigestEntry]]:
     """Парсим JSON-ответ LLM. Возвращает (top_10, honorable_mentions)."""
-    data = json.loads(response.strip())
+    text = response.strip().lstrip("\ufeff").strip()
+    # Remove only recognized wrappers. Don't guess at malformed/truncated JSON
+    # or extract unrelated objects from arbitrary prose.
+    while text.startswith("<think>"):
+        reasoning = re.match(r"<think>.*?</think>\s*", text, flags=re.DOTALL)
+        if reasoning is None:
+            raise ValueError("LLM returned an unfinished <think> block without a JSON answer")
+        text = text[reasoning.end():].strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    if not text:
+        raise ValueError("LLM returned an empty answer instead of JSON")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"LLM answer is not valid JSON (line {error.lineno}, column {error.colno}): {error.msg}"
+        ) from error
     url_to_article = {a.url: a for a in articles}
 
     # New format: {"top": [...], "honorable_mentions": [...]}
     if isinstance(data, dict) and "top" in data:
         top = _parse_entries(data["top"], url_to_article)
         mentions = _parse_entries(data.get("honorable_mentions", []), url_to_article)
+        if not top:
+            raise ValueError("LLM returned no top articles")
         return top, mentions
 
     # Legacy: bare array or {"articles": [...]}
     if isinstance(data, dict):
-        data = data.get("articles", [])
-    return _parse_entries(data, url_to_article), []
+        if "articles" not in data:
+            raise ValueError("LLM answer must contain top or articles")
+        data = data["articles"]
+    entries = _parse_entries(data, url_to_article)
+    if not entries:
+        raise ValueError("LLM returned no articles")
+    return entries, []
